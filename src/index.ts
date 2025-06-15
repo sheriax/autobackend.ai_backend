@@ -26,8 +26,8 @@ app.use('*', cors({
   allowHeaders: ['Content-Type', 'Authorization'],
 }));
 
-app.get('/', (req, res) => {
-  res.status(200).json({ message: 'Welcome to the Auto Backend API' })
+app.get('/', (c) => {
+  return c.json({ message: 'Welcome to the Auto Backend API' })
 })
 
 // Health check endpoint
