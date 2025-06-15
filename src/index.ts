@@ -8,68 +8,70 @@ import { google } from '@ai-sdk/google';
 import { generateObject } from 'ai';
 import { z } from 'zod';
 
-// Initialize Google client
-if (!env.GOOGLE_API_KEY) {
-  throw new Error('GOOGLE_API_KEY is not set in the environment variables');
-}
+async function startServer() {
+  // Initialize Google client
+  if (!env.GOOGLE_API_KEY && !env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    throw new Error('Either GOOGLE_API_KEY or GOOGLE_GENERATIVE_API_KEY must be set');
+  }
 
-const googleClient = google(env.GOOGLE_API_KEY);
+  console.log('GOOGLE GENERATIVE API KEY:', env.GOOGLE_GENERATIVE_AI_API_KEY);
+  console.log('GOOGLE API KEY:', env.GOOGLE_API_KEY);
 
-const app = new Hono();
+  const app = new Hono();
 
-// Middleware
-app.use('*', logger());
-app.use('*', prettyJSON());
-app.use('*', cors({
-  origin: '*',
-  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization'],
-}));
+  // Middlewares
+  app.use('*', logger());
+  app.use('*', prettyJSON());
+  app.use('*', cors({
+    origin: '*',
+    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization'],
+  }));
 
-app.get('/', (c) => {
-  return c.json({ message: 'Welcome to the Auto Backend API' })
-})
-
-// Health check endpoint
-app.get('/health', (c) => {
-  return c.json({ 
-    status: 'healthy', 
-    timestamp: new Date().toISOString(),
-    environment: env.NODE_ENV 
+  app.get('/', (c) => {
+    return c.json({ message: 'Welcome to the Auto Backend API' });
   });
-});
 
-// OpenAPI spec schema for validation
-const openApiSchema = z.object({
-  openapi: z.string().regex(/^3\.\d+\.\d+$/, 'Must be OpenAPI 3.x.x'),
-  info: z.object({
-    title: z.string(),
-    version: z.string(),
-  }),
-  paths: z.record(z.any()),
-  components: z.object({
-    schemas: z.record(z.any()).optional(),
-  }).optional(),
-});
+  // Health check endpoint
+  app.get('/health', (c) => {
+    return c.json({ 
+      status: 'healthy', 
+      timestamp: new Date().toISOString(),
+      environment: env.NODE_ENV 
+    });
+  });
 
-// Core generation endpoint
-app.post('/generate', async (c) => {
-  try {
-    // 1. Parse and validate the OpenAPI spec
-    const body = await c.req.json();
-    
-    const validation = openApiSchema.safeParse(body);
-    if (!validation.success) {
-      return c.json({ 
-        error: 'Invalid OpenAPI specification',
-        details: validation.error.format()
-      }, 400);
-    }
+  // OpenAPI spec schema for validation
+  const openApiSchema = z.object({
+    openapi: z.string().regex(/^3\.\d+\.\d+$/, 'Must be OpenAPI 3.x.x'),
+    info: z.object({
+      title: z.string(),
+      version: z.string(),
+    }),
+    paths: z.record(z.any()),
+    components: z.object({
+      schemas: z.record(z.any()).optional(),
+    }).optional(),
+  });
 
-    const openapiSpec = validation.data;
+  // Core generation endpoint
+  app.post('/generate', async (c) => {
+    try {
+      // 1. Parse and validate the OpenAPI spec
+      const body = await c.req.json();
+      
+      const validation = openApiSchema.safeParse(body);
+      if (!validation.success) {
+        return c.json({ 
+          error: 'Invalid OpenAPI specification',
+          details: validation.error.format()
+        }, 400);
+      }
 
-    // 2. Enhanced system prompt for better code generation
-    const systemPrompt = `You are an expert full-stack developer specializing in creating robust, production-ready backend services with Hono.js and TypeScript.
+      const openapiSpec = validation.data;
+
+      // 2. Enhanced system prompt for better code generation
+      const systemPrompt = `You are an expert full-stack developer specializing in creating robust, production-ready backend services with Hono.js and TypeScript.
 
 **TASK:** Generate a complete Hono.js project from the provided OpenAPI 3.0 specification.
 
@@ -106,70 +108,97 @@ app.post('/generate', async (c) => {
 
 Generate production-ready, well-documented code that follows best practices.`;
 
-    // 3. Generate the project files
-    const { object: generatedFiles } = await generateObject({
-      model: googleClient,
-      schema: z.record(z.string(), z.string()),
-      system: systemPrompt,
-      prompt: `Generate a complete Hono.js project for this OpenAPI specification:\n\n${JSON.stringify(openapiSpec, null, 2)}`,
-      temperature: 0.1, // Lower temperature for more consistent code generation
-    });
+      // 3. Generate the project files using the correct Google AI SDK syntax
+      const { object: generatedFiles } = await generateObject({
+        model: google('gemini-1.5-pro', {
+          apiKey: env.GOOGLE_GENERATIVE_AI_API_KEY || env.GOOGLE_API_KEY
+        }),
+        schema: z.record(z.string(), z.string()),
+        system: systemPrompt,
+        prompt: `Generate a complete Hono.js project for this OpenAPI specification:\n\n${JSON.stringify(openapiSpec, null, 2)}`,
+        temperature: 0.1, // Lower temperature for more consistent code generation
+      });
 
-    // 4. Add metadata to the response
-    const response = {
-      success: true,
-      metadata: {
-        apiTitle: openapiSpec.info.title,
-        apiVersion: openapiSpec.info.version,
-        generatedAt: new Date().toISOString(),
-        fileCount: Object.keys(generatedFiles).length,
-        files: Object.keys(generatedFiles),
-      },
-      files: generatedFiles,
-    };
+      // 4. Add metadata to the response
+      const response = {
+        success: true,
+        metadata: {
+          apiTitle: openapiSpec.info.title,
+          apiVersion: openapiSpec.info.version,
+          generatedAt: new Date().toISOString(),
+          fileCount: Object.keys(generatedFiles).length,
+          files: Object.keys(generatedFiles),
+        },
+        files: generatedFiles,
+      };
 
-    return c.json(response);
+      return c.json(response);
 
-  } catch (error) {
-    console.error('Error generating code:', error);
-    
-    // Better error handling
-    if (error instanceof Error) {
+    } catch (error) {
+      console.error('Error generating code:', error);
+      
+      // Better error handling
+      if (error instanceof Error) {
+        return c.json({ 
+          error: 'Code generation failed',
+          message: error.message,
+          timestamp: new Date().toISOString()
+        }, 500);
+      }
+      
       return c.json({ 
-        error: 'Code generation failed',
-        message: error.message,
+        error: 'Unknown error occurred during code generation',
         timestamp: new Date().toISOString()
       }, 500);
     }
-    
-    return c.json({ 
-      error: 'Unknown error occurred during code generation',
-      timestamp: new Date().toISOString()
-    }, 500);
-  }
-});
+  });
 
-// Generate sample OpenAPI spec endpoint (for testing)
-app.get('/sample-spec', (c) => {
-  const sampleSpec = {
-    openapi: "3.0.0",
-    info: {
-      title: "Sample Blog API",
-      version: "1.0.0",
-      description: "A simple blog API for testing"
-    },
-    paths: {
-      "/posts": {
-        get: {
-          summary: "Get all posts",
-          responses: {
-            "200": {
-              description: "List of posts",
+  // Generate sample OpenAPI spec endpoint (for testing)
+  app.get('/sample-spec', (c) => {
+    const sampleSpec = {
+      openapi: "3.0.0",
+      info: {
+        title: "Sample Blog API",
+        version: "1.0.0",
+        description: "A simple blog API for testing"
+      },
+      paths: {
+        "/posts": {
+          get: {
+            summary: "Get all posts",
+            responses: {
+              "200": {
+                description: "List of posts",
+                content: {
+                  "application/json": {
+                    schema: {
+                      type: "array",
+                      items: {
+                        $ref: "#/components/schemas/Post"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          post: {
+            summary: "Create a new post",
+            requestBody: {
               content: {
                 "application/json": {
                   schema: {
-                    type: "array",
-                    items: {
+                    $ref: "#/components/schemas/CreatePost"
+                  }
+                }
+              }
+            },
+            responses: {
+              "201": {
+                description: "Post created",
+                content: {
+                  "application/json": {
+                    schema: {
                       $ref: "#/components/schemas/Post"
                     }
                   }
@@ -178,24 +207,27 @@ app.get('/sample-spec', (c) => {
             }
           }
         },
-        post: {
-          summary: "Create a new post",
-          requestBody: {
-            content: {
-              "application/json": {
+        "/posts/{id}": {
+          get: {
+            summary: "Get post by ID",
+            parameters: [
+              {
+                name: "id",
+                in: "path",
+                required: true,
                 schema: {
-                  $ref: "#/components/schemas/CreatePost"
+                  type: "string"
                 }
               }
-            }
-          },
-          responses: {
-            "201": {
-              description: "Post created",
-              content: {
-                "application/json": {
-                  schema: {
-                    $ref: "#/components/schemas/Post"
+            ],
+            responses: {
+              "200": {
+                description: "Post details",
+                content: {
+                  "application/json": {
+                    schema: {
+                      $ref: "#/components/schemas/Post"
+                    }
                   }
                 }
               }
@@ -203,101 +235,98 @@ app.get('/sample-spec', (c) => {
           }
         }
       },
-      "/posts/{id}": {
-        get: {
-          summary: "Get post by ID",
-          parameters: [
-            {
-              name: "id",
-              in: "path",
-              required: true,
-              schema: {
+      components: {
+        schemas: {
+          Post: {
+            type: "object",
+            properties: {
+              id: {
+                type: "string"
+              },
+              title: {
+                type: "string"
+              },
+              content: {
+                type: "string"
+              },
+              author: {
+                type: "string"
+              },
+              createdAt: {
+                type: "string",
+                format: "date-time"
+              }
+            }
+          },
+          CreatePost: {
+            type: "object",
+            required: ["title", "content", "author"],
+            properties: {
+              title: {
+                type: "string"
+              },
+              content: {
+                type: "string"
+              },
+              author: {
                 type: "string"
               }
             }
-          ],
-          responses: {
-            "200": {
-              description: "Post details",
-              content: {
-                "application/json": {
-                  schema: {
-                    $ref: "#/components/schemas/Post"
-                  }
-                }
-              }
-            }
           }
         }
       }
-    },
-    components: {
-      schemas: {
-        Post: {
-          type: "object",
-          properties: {
-            id: {
-              type: "string"
-            },
-            title: {
-              type: "string"
-            },
-            content: {
-              type: "string"
-            },
-            author: {
-              type: "string"
-            },
-            createdAt: {
-              type: "string",
-              format: "date-time"
-            }
-          }
-        },
-        CreatePost: {
-          type: "object",
-          required: ["title", "content", "author"],
-          properties: {
-            title: {
-              type: "string"
-            },
-            content: {
-              type: "string"
-            },
-            author: {
-              type: "string"
-            }
-          }
-        }
-      }
+    };
+
+    return c.json(sampleSpec);
+  });
+
+  // Test API key
+  app.get('/test-api', async (c) => {
+    try {
+      const { object } = await generateObject({
+        model: google('gemini-1.5-flash', {
+          apiKey: env.GOOGLE_GENERATIVE_AI_API_KEY || env.GOOGLE_API_KEY
+        }), 
+        schema: z.object({ message: z.string() }),
+        prompt: 'Say hello'
+      });
+      console.log('The object ran');
+      return c.json({ success: true, result: object });
+    } catch (error) {
+      return c.json({ 
+        error: 'API test failed', 
+        message: error.message,
+        stack: error.stack 
+      }, 500);
     }
-  };
+  });
 
-  return c.json(sampleSpec);
-});
+  // 404 handler
+  app.notFound((c) => {
+    return c.json({ error: 'Route not found' }, 404);
+  });
 
-// 404 handler
-app.notFound((c) => {
-  return c.json({ error: 'Route not found' }, 404);
-});
+  // Error handler
+  app.onError((err, c) => {
+    console.error('Unhandled error:', err);
+    return c.json({ 
+      error: 'Internal server error',
+      message: err.message,
+      timestamp: new Date().toISOString()
+    }, 500);
+  });
 
-// Error handler
-app.onError((err, c) => {
-  console.error('Unhandled error:', err);
-  return c.json({ 
-    error: 'Internal server error',
-    message: err.message,
-    timestamp: new Date().toISOString()
-  }, 500);
-});
+  const port = Number(env.PORT);
+  console.log(`🚀 Hono Auto Backend API running on port ${port}`);
+  console.log(`📝 Health check: http://localhost:${port}/health`);
+  console.log(`🔧 Generate API: POST http://localhost:${port}/generate`);
+  console.log(`📋 Sample spec: GET http://localhost:${port}/sample-spec`);
 
-const port = Number(env.PORT);
-console.log(`🚀 Hono Auto Backend API running on port ${port}`);
-console.log(`📝 Health check: http://localhost:${port}/health`);
-console.log(`🔧 Generate API: POST http://localhost:${port}/generate`);
-console.log(`📋 Sample spec: GET http://localhost:${port}/sample-spec`);
+  serve({
+    fetch: app.fetch,
+    port,
+  });
+}
 
-serve({
-  fetch: app.fetch,
-  port,
-});
+// Start the server
+startServer().catch(console.error);

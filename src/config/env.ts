@@ -1,9 +1,9 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config();
 
-const env = {
-  PORT: process.env.PORT || 3000,
+export default {
+  GOOGLE_GENERATIVE_AI_API_KEY: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
   GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
-  NODE_ENV: process.env.NODE_ENV || 'development',
+  PORT: process.env.PORT || 3000,
+  NODE_ENV: process.env.NODE_ENV || 'development'
 };
-
-export default env;
