@@ -34,10 +34,10 @@ async function startServer() {
 
   // Health check endpoint
   app.get('/health', (c) => {
-    return c.json({ 
-      status: 'healthy', 
+    return c.json({
+      status: 'healthy',
       timestamp: new Date().toISOString(),
-      environment: env.NODE_ENV 
+      environment: env.NODE_ENV
     });
   });
 
@@ -54,15 +54,36 @@ async function startServer() {
     }).optional(),
   });
 
+  app.get('/test-api', async (c) => {
+    try {
+      const { object } = await generateObject({
+        model: google('gemini-pro', {
+          apiKey: env.GOOGLE_GENERATIVE_AI_API_KEY || env.GOOGLE_API_KEY
+        }),
+        schema: z.object({ message: z.string() }),
+        prompt: 'Say hello'
+      });
+
+      return c.json({ success: true, result: object });
+    } catch (error) {
+      return c.json({
+        error: 'API test failed',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
+      }, 500);
+    }
+  });
+
   // Core generation endpoint
   app.post('/generate', async (c) => {
     try {
       // 1. Parse and validate the OpenAPI spec
       const body = await c.req.json();
-      
+      console.log(body);
+
       const validation = openApiSchema.safeParse(body);
       if (!validation.success) {
-        return c.json({ 
+        return c.json({
           error: 'Invalid OpenAPI specification',
           details: validation.error.format()
         }, 400);
@@ -76,7 +97,7 @@ async function startServer() {
 **TASK:** Generate a complete Hono.js project from the provided OpenAPI 3.0 specification.
 
 **OUTPUT FORMAT:** Return a JSON object where:
-- Keys are file paths (e.g., "src/routes/users.ts", "src/models/User.ts")
+- Keys are file paths (e.g., "src/routes/users.ts", "src/models/User.ts", "docs/api.md")
 - Values are the complete file contents as strings
 
 **PROJECT STRUCTURE:**
@@ -88,15 +109,36 @@ async function startServer() {
 6. **package.json**: Complete dependencies
 7. **tsconfig.json**: TypeScript configuration
 8. **README.md**: Setup and usage instructions
+9. **documentation.md**: Markdown-formatted API documentation
+
+**documentation.md REQUIREMENTS:**
+- Start with the API title, version, and description
+- Group endpoints by tags if available, or by path prefix
+- For each endpoint:
+  - List the **HTTP method** and **URL path** (e.g., \`GET /users/{id}\`)
+  - Show the **summary** or description
+  - Document **path**, **query**, and **header parameters** in a table:
+    | Name | In | Type | Required | Description |
+  - If a request body exists:
+    - Show the **schema** in a code block (JSON format)
+    - Add a **request example** using \`\`\`json code block
+  - List each **response code**:
+    - Describe the response purpose (e.g., 200 OK, 400 Bad Request)
+    - Show the **schema** and an example \`\`\`json response
+- Use markdown hierarchy:
+  - \`##\` for section titles (like endpoint group)
+  - \`###\` for individual endpoints
+  - Use tables and bullet points where needed
+  - Format code examples with proper \`\`\`json blocks
+
+
 
 **CODE REQUIREMENTS:**
-- Use TypeScript with proper typing
-- Implement proper error handling
-- Add input validation using Zod
-- Include proper HTTP status codes
-- Add JSDoc comments for functions
-- Use consistent code formatting
-- Include example request/response data in comments
+- Use TypeScript with strong typing
+- Validate inputs with Zod
+- Use Hono.js idioms and proper HTTP status codes
+- Include meaningful comments and docstrings
+- Format code cleanly and consistently
 
 **DEPENDENCIES TO INCLUDE:**
 - hono (latest)
@@ -106,11 +148,48 @@ async function startServer() {
 - typescript
 - tsx (for development)
 
-Generate production-ready, well-documented code that follows best practices.`;
+Generate production-ready, well-documented code and docs.`;
+
+      //       const systemPrompt = `You are an expert full-stack developer specializing in creating robust, production-ready backend services with Hono.js and TypeScript.
+
+      // **TASK:** Generate a complete Hono.js project from the provided OpenAPI 3.0 specification.
+
+      // **OUTPUT FORMAT:** Return a JSON object where:
+      // - Keys are file paths (e.g., "src/routes/users.ts", "src/models/User.ts")
+      // - Values are the complete file contents as strings
+
+      // **PROJECT STRUCTURE:**
+      // 1. **src/index.ts**: Main entry point with Hono app initialization
+      // 2. **src/routes/*.ts**: Route handlers organized by resource
+      // 3. **src/models/*.ts**: TypeScript interfaces/types from OpenAPI schemas
+      // 4. **src/middleware/*.ts**: Custom middleware if needed
+      // 5. **src/utils/*.ts**: Utility functions
+      // 6. **package.json**: Complete dependencies
+      // 7. **tsconfig.json**: TypeScript configuration
+      // 8. **README.md**: Setup and usage instructions
+
+      // **CODE REQUIREMENTS:**
+      // - Use TypeScript with proper typing
+      // - Implement proper error handling
+      // - Add input validation using Zod
+      // - Include proper HTTP status codes
+      // - Add JSDoc comments for functions
+      // - Use consistent code formatting
+      // - Include example request/response data in comments
+
+      // **DEPENDENCIES TO INCLUDE:**
+      // - hono (latest)
+      // - @hono/node-server
+      // - zod (for validation)
+      // - @types/node
+      // - typescript
+      // - tsx (for development)
+
+      // Generate production-ready, well-documented code that follows best practices.`;
 
       // 3. Generate the project files using the correct Google AI SDK syntax
       const { object: generatedFiles } = await generateObject({
-        model: google('gemini-1.5-pro', {
+        model: google('models/gemini-1.5-flash-latest', {
           apiKey: env.GOOGLE_GENERATIVE_AI_API_KEY || env.GOOGLE_API_KEY
         }),
         schema: z.record(z.string(), z.string()),
@@ -136,17 +215,17 @@ Generate production-ready, well-documented code that follows best practices.`;
 
     } catch (error) {
       console.error('Error generating code:', error);
-      
+
       // Better error handling
       if (error instanceof Error) {
-        return c.json({ 
+        return c.json({
           error: 'Code generation failed',
           message: error.message,
           timestamp: new Date().toISOString()
         }, 500);
       }
-      
-      return c.json({ 
+
+      return c.json({
         error: 'Unknown error occurred during code generation',
         timestamp: new Date().toISOString()
       }, 500);
@@ -286,17 +365,17 @@ Generate production-ready, well-documented code that follows best practices.`;
       const { object } = await generateObject({
         model: google('gemini-1.5-flash', {
           apiKey: env.GOOGLE_GENERATIVE_AI_API_KEY || env.GOOGLE_API_KEY
-        }), 
+        }),
         schema: z.object({ message: z.string() }),
         prompt: 'Say hello'
       });
       console.log('The object ran');
       return c.json({ success: true, result: object });
     } catch (error) {
-      return c.json({ 
-        error: 'API test failed', 
+      return c.json({
+        error: 'API test failed',
         message: error.message,
-        stack: error.stack 
+        stack: error.stack
       }, 500);
     }
   });
@@ -309,7 +388,7 @@ Generate production-ready, well-documented code that follows best practices.`;
   // Error handler
   app.onError((err, c) => {
     console.error('Unhandled error:', err);
-    return c.json({ 
+    return c.json({
       error: 'Internal server error',
       message: err.message,
       timestamp: new Date().toISOString()
